@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Toggle } from "@/components/ui/toggle"
-import { Pencil, Square, Circle, Type, Minus, Grid, Trash2, Download, Move, Eraser } from "lucide-react"
+import { Pencil, Square, Circle, Type, Minus, Grid, Trash2, Download, Move, Eraser, Copy } from "lucide-react"
 
 type Tool = "pen" | "line" | "rectangle" | "circle" | "text" | "move" | "eraser"
 type Shape = {
@@ -36,6 +36,9 @@ export default function DrawingCanvas() {
   const [elements, setElements] = useState<DrawingElement[]>([])
   const [movingElement, setMovingElement] = useState<DrawingElement | null>(null)
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 })
+  const [selectedElement, setSelectedElement] = useState<DrawingElement | null>(null)
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null)
+  const [copiedElement, setCopiedElement] = useState<DrawingElement | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -93,6 +96,119 @@ export default function DrawingCanvas() {
     ctx.restore()
   }, [ctx])
 
+  const getResizeHandle = (x: number, y: number, element: DrawingElement): string | null => {
+    if (element.type === "text") return null
+
+    const tolerance = 8
+
+    if (element.type === "circle") {
+      const centerX = element.startX
+      const centerY = element.startY
+      const radius = Math.sqrt(Math.pow(element.endX - element.startX, 2) + Math.pow(element.endY - element.startY, 2))
+
+      // Check if click is near any of the 8 handle positions on the circle
+      const handles = [
+        { x: centerX, y: centerY - radius, handle: "n" },
+        { x: centerX + radius * Math.cos(Math.PI / 4), y: centerY - radius * Math.sin(Math.PI / 4), handle: "ne" },
+        { x: centerX + radius, y: centerY, handle: "e" },
+        { x: centerX + radius * Math.cos(Math.PI / 4), y: centerY + radius * Math.sin(Math.PI / 4), handle: "se" },
+        { x: centerX, y: centerY + radius, handle: "s" },
+        { x: centerX - radius * Math.cos(Math.PI / 4), y: centerY + radius * Math.sin(Math.PI / 4), handle: "sw" },
+        { x: centerX - radius, y: centerY, handle: "w" },
+        { x: centerX - radius * Math.cos(Math.PI / 4), y: centerY - radius * Math.sin(Math.PI / 4), handle: "nw" },
+      ]
+
+      for (const handle of handles) {
+        if (Math.abs(x - handle.x) < tolerance && Math.abs(y - handle.y) < tolerance) {
+          return handle.handle
+        }
+      }
+      return null
+    }
+
+    // For rectangles and lines
+    const minX = Math.min(element.startX, element.endX)
+    const maxX = Math.max(element.startX, element.endX)
+    const minY = Math.min(element.startY, element.endY)
+    const maxY = Math.max(element.startY, element.endY)
+
+    const handleTolerance = 4
+
+    // Check corners
+    if (Math.abs(x - minX) < handleTolerance && Math.abs(y - minY) < handleTolerance) return "nw"
+    if (Math.abs(x - maxX) < handleTolerance && Math.abs(y - minY) < handleTolerance) return "ne"
+    if (Math.abs(x - minX) < handleTolerance && Math.abs(y - maxY) < handleTolerance) return "sw"
+    if (Math.abs(x - maxX) < handleTolerance && Math.abs(y - maxY) < handleTolerance) return "se"
+
+    // Check edges
+    if (Math.abs(x - minX) < handleTolerance && y > minY + handleTolerance && y < maxY - handleTolerance) return "w"
+    if (Math.abs(x - maxX) < handleTolerance && y > minY + handleTolerance && y < maxY - handleTolerance) return "e"
+    if (Math.abs(y - minY) < handleTolerance && x > minX + handleTolerance && x < maxX - handleTolerance) return "n"
+    if (Math.abs(y - maxY) < handleTolerance && x > minX + handleTolerance && x < maxX - handleTolerance) return "s"
+
+    return null
+  }
+
+  const drawResizeHandles = useCallback(
+    (element: DrawingElement) => {
+      if (!ctx || element.type === "text" || element.type === "pen") return
+
+      const handleSize = 6
+
+      ctx.fillStyle = "#3b82f6"
+      ctx.strokeStyle = "#ffffff"
+      ctx.lineWidth = 1
+
+      if (element.type === "circle") {
+        const centerX = element.startX
+        const centerY = element.startY
+        const radius = Math.sqrt(
+          Math.pow(element.endX - element.startX, 2) + Math.pow(element.endY - element.startY, 2),
+        )
+
+        // Draw handles on the circle circumference
+        const handles = [
+          { x: centerX, y: centerY - radius }, // n
+          { x: centerX + radius * Math.cos(Math.PI / 4), y: centerY - radius * Math.sin(Math.PI / 4) }, // ne
+          { x: centerX + radius, y: centerY }, // e
+          { x: centerX + radius * Math.cos(Math.PI / 4), y: centerY + radius * Math.sin(Math.PI / 4) }, // se
+          { x: centerX, y: centerY + radius }, // s
+          { x: centerX - radius * Math.cos(Math.PI / 4), y: centerY + radius * Math.sin(Math.PI / 4) }, // sw
+          { x: centerX - radius, y: centerY }, // w
+          { x: centerX - radius * Math.cos(Math.PI / 4), y: centerY - radius * Math.sin(Math.PI / 4) }, // nw
+        ]
+
+        handles.forEach((handle) => {
+          ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+          ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+        })
+      } else {
+        // For rectangles and lines
+        const minX = Math.min(element.startX, element.endX)
+        const maxX = Math.max(element.startX, element.endX)
+        const minY = Math.min(element.startY, element.endY)
+        const maxY = Math.max(element.startY, element.endY)
+
+        const handles = [
+          { x: minX, y: minY }, // nw
+          { x: maxX, y: minY }, // ne
+          { x: minX, y: maxY }, // sw
+          { x: maxX, y: maxY }, // se
+          { x: minX, y: (minY + maxY) / 2 }, // w
+          { x: maxX, y: (minY + maxY) / 2 }, // e
+          { x: (minX + maxX) / 2, y: minY }, // n
+          { x: (minX + maxX) / 2, y: maxY }, // s
+        ]
+
+        handles.forEach((handle) => {
+          ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+          ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+        })
+      }
+    },
+    [ctx],
+  )
+
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!ctx || !canvasRef.current) return
 
@@ -101,10 +217,22 @@ export default function DrawingCanvas() {
     const y = e.clientY - rect.top
 
     if (tool === "move") {
+      // Check if clicking on resize handle first
+      if (selectedElement) {
+        const handle = getResizeHandle(x, y, selectedElement)
+        if (handle) {
+          setResizeHandle(handle)
+          return
+        }
+      }
+
       const clickedElement = elements.find((el) => isPointInElement(x, y, el))
       if (clickedElement) {
+        setSelectedElement(clickedElement)
         setMovingElement(clickedElement)
         setMoveOffset({ x: x - (clickedElement as Shape).startX, y: y - (clickedElement as Shape).startY })
+      } else {
+        setSelectedElement(null)
       }
       return
     }
@@ -114,6 +242,7 @@ export default function DrawingCanvas() {
       return
     }
 
+    setSelectedElement(null)
     setIsDrawing(true)
 
     if (tool === "text") {
@@ -142,28 +271,129 @@ export default function DrawingCanvas() {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    if (tool === "move" && movingElement) {
-      const newX = x - moveOffset.x
-      const newY = y - moveOffset.y
-      setElements((prev) =>
-        prev.map((el) =>
-          el.id === movingElement.id
-            ? {
+    if (tool === "move") {
+      if (resizeHandle && selectedElement) {
+        // Handle resizing
+        setElements((prev) =>
+          prev.map((el) => {
+            if (el.id === selectedElement.id && el.type !== "text" && el.type !== "pen") {
+              if (el.type === "circle") {
+                // For circles, calculate new radius based on distance from center to mouse
+                const centerX = el.startX
+                const centerY = el.startY
+                const newRadius = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+
+                // Update endX and endY to represent the new radius
+                const updatedElement = {
+                  ...el,
+                  endX: centerX + newRadius,
+                  endY: centerY,
+                }
+
+                setSelectedElement(updatedElement)
+                return updatedElement
+              } else {
+                // For rectangles and lines
+                const minX = Math.min(el.startX, el.endX)
+                const maxX = Math.max(el.startX, el.endX)
+                const minY = Math.min(el.startY, el.endY)
+                const maxY = Math.max(el.startY, el.endY)
+
+                let newStartX = el.startX
+                let newStartY = el.startY
+                let newEndX = el.endX
+                let newEndY = el.endY
+
+                switch (resizeHandle) {
+                  case "nw":
+                    newStartX = el.startX < el.endX ? x : el.endX
+                    newStartY = el.startY < el.endY ? y : el.endY
+                    newEndX = el.startX < el.endX ? el.endX : x
+                    newEndY = el.startY < el.endY ? el.endY : y
+                    break
+                  case "ne":
+                    if (el.startX < el.endX) {
+                      // Normal orientation
+                      newStartX = el.startX
+                      newStartY = y
+                      newEndX = x
+                      newEndY = el.endY
+                    } else {
+                      // Flipped horizontally
+                      newStartX = x
+                      newStartY = y
+                      newEndX = el.startX
+                      newEndY = el.endY
+                    }
+                    break
+                  case "sw":
+                    newStartX = el.startX < el.endX ? x : el.endX
+                    newStartY = el.startY < el.endY ? el.startY : y
+                    newEndX = el.startX < el.endX ? el.endX : x
+                    newEndY = el.startY < el.endY ? y : el.startY
+                    break
+                  case "se":
+                    newStartX = el.startX < el.endX ? el.startX : x
+                    newStartY = el.startY < el.endY ? el.startY : y
+                    newEndX = el.startX < el.endX ? x : el.startX
+                    newEndY = el.startY < el.endY ? y : el.startY
+                    break
+                  case "w":
+                    newStartX = el.startX < el.endX ? x : el.endX
+                    newEndX = el.startX < el.endX ? el.endX : x
+                    break
+                  case "e":
+                    newStartX = el.startX < el.endX ? el.startX : x
+                    newEndX = el.startX < el.endX ? x : el.startX
+                    break
+                  case "n":
+                    newStartY = el.startY < el.endY ? y : el.endY
+                    newEndY = el.startY < el.endY ? el.endY : y
+                    break
+                  case "s":
+                    newStartY = el.startY < el.endY ? el.startY : y
+                    newEndY = el.startY < el.endY ? y : el.endY
+                    break
+                }
+
+                const updatedElement = { ...el, startX: newStartX, startY: newStartY, endX: newEndX, endY: newEndY }
+
+                // Update selectedElement to reflect the changes
+                setSelectedElement(updatedElement)
+
+                return updatedElement
+              }
+            }
+            return el
+          }),
+        )
+        return
+      }
+
+      if (movingElement) {
+        const newX = x - moveOffset.x
+        const newY = y - moveOffset.y
+        setElements((prev) =>
+          prev.map((el) => {
+            if (el.id === movingElement.id) {
+              const updatedElement = {
                 ...el,
                 startX: newX,
                 startY: newY,
                 endX: newX + (el as Shape).endX - (el as Shape).startX,
                 endY: newY + (el as Shape).endY - (el as Shape).startY,
               }
-            : el,
-        ),
-      )
-      return
-    }
 
-    if (tool === "eraser") {
-      eraseElements(x, y)
-      return
+              // Update selectedElement to reflect the changes
+              setSelectedElement(updatedElement)
+
+              return updatedElement
+            }
+            return el
+          }),
+        )
+        return
+      }
     }
 
     if (!isDrawing) return
@@ -184,6 +414,7 @@ export default function DrawingCanvas() {
   const finishDrawing = () => {
     setIsDrawing(false)
     setMovingElement(null)
+    setResizeHandle(null)
   }
 
   const addTextToCanvas = () => {
@@ -239,17 +470,24 @@ export default function DrawingCanvas() {
       } else if (element.type === "rectangle") {
         const width = element.endX - element.startX
         const height = element.endY - element.startY
-        const radius = Math.min(10, Math.abs(width) / 4, Math.abs(height) / 4)
+
+        const x = Math.min(element.startX, element.endX)
+        const y = Math.min(element.startY, element.endY)
+        const w = Math.abs(width)
+        const h = Math.abs(height)
+
+        const radius = Math.min(10, w / 4, h / 4)
+
         ctx.beginPath()
-        ctx.moveTo(element.startX + radius, element.startY)
-        ctx.lineTo(element.endX - radius, element.startY)
-        ctx.quadraticCurveTo(element.endX, element.startY, element.endX, element.startY + radius)
-        ctx.lineTo(element.endX, element.endY - radius)
-        ctx.quadraticCurveTo(element.endX, element.endY, element.endX - radius, element.endY)
-        ctx.lineTo(element.startX + radius, element.endY)
-        ctx.quadraticCurveTo(element.startX, element.endY, element.startX, element.endY - radius)
-        ctx.lineTo(element.startX, element.startY + radius)
-        ctx.quadraticCurveTo(element.startX, element.startY, element.startX + radius, element.startY)
+        ctx.moveTo(x + radius, y)
+        ctx.lineTo(x + w - radius, y)
+        ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
+        ctx.lineTo(x + w, y + h - radius)
+        ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
+        ctx.lineTo(x + radius, y + h)
+        ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
+        ctx.lineTo(x, y + radius)
+        ctx.quadraticCurveTo(x, y, x + radius, y)
         ctx.closePath()
         ctx.stroke()
       } else if (element.type === "circle") {
@@ -264,17 +502,33 @@ export default function DrawingCanvas() {
         ctx.fillText(element.content, element.x, element.y)
       }
     })
-  }, [ctx, elements, showGrid, drawGrid])
+
+    // Draw resize handles for selected element
+    if (selectedElement && tool === "move") {
+      drawResizeHandles(selectedElement)
+    }
+  }, [ctx, elements, showGrid, drawGrid, selectedElement, tool, drawResizeHandles])
 
   const isPointInElement = (x: number, y: number, element: DrawingElement) => {
     if (element.type === "text") {
       return x >= element.x && x <= element.x + 50 && y >= element.y - element.fontSize && y <= element.y
+    } else if (element.type === "circle") {
+      // For circles, check if point is within the circle
+      const centerX = element.startX
+      const centerY = element.startY
+      const radius = Math.sqrt(Math.pow(element.endX - element.startX, 2) + Math.pow(element.endY - element.startY, 2))
+      const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+      return distance <= radius + 5 // Add 5px padding for easier selection
     } else {
+      // Handle negative dimensions properly for rectangles and lines
       const minX = Math.min(element.startX, element.endX)
       const maxX = Math.max(element.startX, element.endX)
       const minY = Math.min(element.startY, element.endY)
       const maxY = Math.max(element.startY, element.endY)
-      return x >= minX && x <= maxX && y >= minY && y <= maxY
+
+      // Add some padding for better selection
+      const padding = 5
+      return x >= minX - padding && x <= maxX + padding && y >= minY - padding && y <= maxY + padding
     }
   }
 
@@ -282,7 +536,11 @@ export default function DrawingCanvas() {
     setElements((prev) =>
       prev.filter((el) => {
         if (el.type === "pen" && el.points) {
-          return !el.points.some((point) => Math.abs(point.x - x) < 5 && Math.abs(point.y - y) < 5)
+          // For pen strokes, check if click is close to any point in the path
+          return !el.points.some((point) => {
+            const distance = Math.sqrt(Math.pow(point.x - x, 2) + Math.pow(point.y - y, 2))
+            return distance < 10 // 10 pixel tolerance
+          })
         } else {
           return !isPointInElement(x, y, el)
         }
@@ -319,6 +577,7 @@ export default function DrawingCanvas() {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
+    // Check if right-clicking on text for editing
     const clickedElement = elements.find((el) => el.type === "text" && isPointInElement(x, y, el))
     if (clickedElement && clickedElement.type === "text") {
       setEditingTextId(clickedElement.id)
@@ -326,8 +585,55 @@ export default function DrawingCanvas() {
       setTextPosition({ x: clickedElement.x, y: clickedElement.y })
       setIsAddingText(true)
       setTimeout(() => textInputRef.current?.focus(), 0)
+    } else if (copiedElement) {
+      // Paste copied element at cursor position
+      pasteElement(x, y)
     }
   }
+
+  const copyElement = () => {
+    if (selectedElement) {
+      setCopiedElement(selectedElement)
+    }
+  }
+
+  const pasteElement = (x: number, y: number) => {
+    if (!copiedElement) return
+
+    const newElement: DrawingElement = {
+      ...copiedElement,
+      id: Date.now().toString(),
+    }
+
+    if (newElement.type === "text") {
+      newElement.x = x
+      newElement.y = y
+    } else {
+      const width = (newElement as Shape).endX - (newElement as Shape).startX
+      const height = (newElement as Shape).endY - (newElement as Shape).startY
+      ;(newElement as Shape).startX = x
+      ;(newElement as Shape).startY = y
+      ;(newElement as Shape).endX = x + width
+      ;(newElement as Shape).endY = y + height
+    }
+
+    setElements((prev) => [...prev, newElement])
+    setSelectedElement(newElement)
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "c" && selectedElement) {
+          e.preventDefault()
+          copyElement()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [selectedElement])
 
   return (
     <div className="relative h-full w-full">
@@ -390,6 +696,16 @@ export default function DrawingCanvas() {
           >
             <Eraser className="h-5 w-5" />
           </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={copyElement}
+            disabled={!selectedElement}
+            className="h-9 w-9 bg-transparent"
+            title="Copy selected element (Ctrl+C)"
+          >
+            <Copy className="h-5 w-5" />
+          </Button>
         </div>
 
         <div className="flex items-center gap-2 border-r pr-2">
@@ -408,11 +724,11 @@ export default function DrawingCanvas() {
             <Grid className="h-4 w-4" />
           </Toggle>
 
-          <Button variant="outline" size="icon" onClick={clearCanvas} className="h-9 w-9">
+          <Button variant="outline" size="icon" onClick={clearCanvas} className="h-9 w-9 bg-transparent">
             <Trash2 className="h-5 w-5" />
           </Button>
 
-          <Button variant="outline" size="icon" onClick={downloadCanvas} className="h-9 w-9">
+          <Button variant="outline" size="icon" onClick={downloadCanvas} className="h-9 w-9 bg-transparent">
             <Download className="h-5 w-5" />
           </Button>
         </div>
